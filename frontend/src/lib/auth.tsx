@@ -8,6 +8,7 @@ type AuthCtx = {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx>({
@@ -15,6 +16,7 @@ const Ctx = createContext<AuthCtx>({
   loading: true,
   login: async () => {},
   logout: () => {},
+  refreshUser: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -47,8 +49,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
+  async function refreshUser() {
+    const u = await api.get("/api/auth/me");
+    setUser(u);
+  }
+
   return (
-    <Ctx.Provider value={{ user, loading, login, logout }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ user, loading, login, logout, refreshUser }}>
+      {children}
+    </Ctx.Provider>
   );
 }
 

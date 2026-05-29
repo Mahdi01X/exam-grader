@@ -1,4 +1,5 @@
-from pydantic import BaseModel, EmailStr
+from typing import Optional
+from pydantic import BaseModel, EmailStr, Field
 from app.models.user import UserRole
 
 
@@ -17,7 +18,9 @@ class TokenResponse(BaseModel):
 
 class UserOut(BaseModel):
     id: int
-    email: EmailStr
+    # str (pas EmailStr) : modèle de SORTIE — on n'impose pas la validation stricte
+    # ici (ex. admin@local). La validation reste sur les entrées (login, create, update).
+    email: str
     name: str
     role: UserRole
     is_active: bool
@@ -31,3 +34,13 @@ class UserCreate(BaseModel):
     name: str
     password: str
     role: UserRole = UserRole.professeur
+
+
+class UpdateMeRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
