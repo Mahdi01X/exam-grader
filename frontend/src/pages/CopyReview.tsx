@@ -140,7 +140,7 @@ export default function CopyReview() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <Link
             to={`/exams/${copy.exam_id}`}
@@ -186,9 +186,9 @@ export default function CopyReview() {
       </div>
 
       {/* Side by side */}
-      <div className="grid lg:grid-cols-2 gap-4 h-[calc(100vh-210px)]">
+      <div className="grid lg:grid-cols-2 gap-4 lg:h-[calc(100vh-200px)]">
         {/* Page viewer */}
-        <Card className="flex flex-col overflow-hidden">
+        <Card className="flex flex-col overflow-hidden h-[60vh] lg:h-full">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50/50">
             <span className="text-sm text-slate-500">
               Page <span className="font-medium text-slate-700">{page}</span> / {copy.page_count}
@@ -216,7 +216,7 @@ export default function CopyReview() {
         </Card>
 
         {/* Questions */}
-        <div className="overflow-y-auto pr-1 space-y-3">
+        <div className="lg:overflow-y-auto pr-1 space-y-3">
           {rubric.map((r) => {
             const g = gradesByQ.get(r.id);
             return (

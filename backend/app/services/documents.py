@@ -24,19 +24,34 @@ def count_pdf_pages(path: Path) -> int:
 
 
 def render_pdf_to_pngs(path: Path, output_dir: Path, dpi: int | None = None) -> List[Path]:
-    """Rend chaque page d'un PDF en PNG dans output_dir/page-XXX.png."""
+    """Rend chaque page d'un PDF en PNG dans output_dir/page-XXX.png.
+
+    Rendu PAGE PAR PAGE : `convert_from_path` chargerait sinon toutes les pages
+    en RAM simultanément (≈25 Mo/page à 300 DPI), ce qui fait sauter les petites
+    instances cloud (512 Mo). On borne la mémoire à une page à la fois.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     settings = get_settings()
     dpi = dpi or settings.pdf_render_dpi
     # poppler_path vide => on s'appuie sur le PATH (cas Docker/Linux).
     poppler_path = settings.poppler_path or None
-    pages = convert_from_path(str(path), dpi=dpi, fmt="png", poppler_path=poppler_path)
+    total = count_pdf_pages(path)
     out: List[Path] = []
-    for idx, img in enumerate(pages, start=1):
-        dst = output_dir / f"page-{idx:03d}.png"
-        img.save(dst, "PNG", optimize=True)
-        out.append(dst)
-    logger.info("rendered %d pages from %s at %d DPI", len(out), path.name, dpi)
+    for i in range(1, total + 1):
+        imgs = convert_from_path(
+            str(path),
+            dpi=dpi,
+            fmt="png",
+            first_page=i,
+            last_page=i,
+            poppler_path=poppler_path,
+        )
+        if imgs:
+            dst = output_dir / f"page-{i:03d}.png"
+            imgs[0].save(dst, "PNG", optimize=True)
+            out.append(dst)
+            del imgs  # libère la mémoire de la page avant la suivante
+    logger.info("rendered %d pages from %s at %d DPI (page-by-page)", len(out), path.name, dpi)
     return out
 
 

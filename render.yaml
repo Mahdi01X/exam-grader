@@ -50,7 +50,7 @@ services:
       - key: POPPLER_PATH
         value: ""              # vide => poppler via le PATH (présent dans l'image)
       - key: PDF_RENDER_DPI
-        value: "300"
+        value: "150"   # 150 DPI suffit (resize vision à 1568px) et limite la RAM
       - key: CONFIDENCE_REVIEW_THRESHOLD
         value: "0.80"
       - key: MAX_UPLOAD_MB
