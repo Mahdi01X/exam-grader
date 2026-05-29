@@ -1,0 +1,14 @@
+# Ne jamais embarquer ces éléments dans l'image (secrets, artefacts locaux)
+.env
+.env.*
+.venv/
+venv/
+data_local/
+*.db
+*.sqlite3
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/

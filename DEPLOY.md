@@ -11,7 +11,7 @@ Ce guide déploie ExamGrader sur **Render** avec le blueprint [`render.yaml`](./
 ## Pré-requis
 - 👤 Un compte **GitHub** (gratuit)
 - 👤 Un compte **Render** (gratuit) — connexion via GitHub recommandée
-- 👤 Une **clé API Anthropic** (`console.anthropic.com` → API Keys)
+- 👤 Une **clé API OpenAI** (`platform.openai.com` → API Keys)
 
 ---
 
@@ -43,7 +43,7 @@ Le `.gitignore` exclut déjà `.env`, la base SQLite locale, `node_modules`, `da
 4. Il te demande les variables marquées `sync: false` — renseigne-les :
    | Variable | Valeur |
    |---|---|
-   | `ANTHROPIC_API_KEY` | ta clé `sk-ant-...` |
+   | `OPENAI_API_KEY` | ta clé `sk-...` |
    | `BOOTSTRAP_ADMIN_EMAIL` | ton email admin (ex. `prof@univ.fr`) |
    | `BOOTSTRAP_ADMIN_PASSWORD` | un mot de passe initial fort |
 5. **Apply** → Render provisionne la base, build l'image Docker de l'API (avec poppler) et build le frontend.
@@ -80,8 +80,8 @@ Crée ensuite tes comptes professeur/assistant depuis l'API (`POST /api/auth/use
 - **Postgres free** : expire après ~90 jours ; passer à un plan payant pour la prod.
 
 ## Modèle IA
-`ANTHROPIC_MODEL` (défaut `claude-opus-4-7`) doit correspondre à un **modèle vision** que ton compte
-supporte. Ajuste-le dans le service `examgrader-api` si besoin, puis redéploie.
+`OPENAI_MODEL` (défaut `gpt-4o`) est un modèle vision OpenAI. Ajuste-le dans le service
+`examgrader-api` si besoin (ex. `gpt-4o-mini` pour réduire les coûts), puis redéploie.
 
 ## Conformité (RGPD)
 - Région **Frankfurt (UE)**.

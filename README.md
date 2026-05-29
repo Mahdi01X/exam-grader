@@ -7,7 +7,7 @@ Le professeur reste décideur final. Le système ne valide jamais une note en si
 
 ## Stack
 - **Backend** : Python 3.11+, FastAPI, SQLAlchemy 2.x, Alembic, PostgreSQL 16
-- **Moteur IA** : Anthropic Claude (vision + raisonnement) via `ANTHROPIC_API_KEY`
+- **Moteur IA** : OpenAI GPT-4o (vision + raisonnement) via `OPENAI_API_KEY`
 - **Documents** : `pypdf`, `pdf2image`, `Pillow` (rendu PDF→images à 300 DPI)
 - **Frontend** : React 18 + TypeScript + Vite + Tailwind CSS
 - **Stockage** : abstraction `StorageBackend` (local par défaut, interface S3-ready)
@@ -19,12 +19,12 @@ Le professeur reste décideur final. Le système ne valide jamais une note en si
 ### 1. Pré-requis
 - Docker + Docker Compose
 - `poppler-utils` installé dans l'image backend (pour `pdf2image`)
-- Une clé API Anthropic
+- Une clé API OpenAI
 
 ### 2. Configuration
 ```bash
 cp .env.example .env
-# Édite .env et renseigne ANTHROPIC_API_KEY + JWT_SECRET
+# Édite .env et renseigne OPENAI_API_KEY + JWT_SECRET
 ```
 
 ### 3. Lancement
@@ -66,7 +66,7 @@ exam-grader/
 Voir `docs/PHASES.md` pour le détail des étapes et comment tester chacune.
 
 ## Sécurité & conformité
-- `ANTHROPIC_API_KEY` et `JWT_SECRET` sont en variables d'environnement, jamais commités
+- `OPENAI_API_KEY` et `JWT_SECRET` sont en variables d'environnement, jamais commités
 - Pas de PII dans les logs applicatifs (voir `app/core/logging.py`)
 - Suppression / anonymisation des copies disponible via endpoint admin
 - Chiffrement au repos : à brancher au niveau du `StorageBackend` (voir `storage/local.py`)

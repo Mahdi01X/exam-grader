@@ -34,13 +34,13 @@ services:
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
-      - key: ANTHROPIC_API_KEY
+      - key: OPENAI_API_KEY
         sync: false            # saisi à la création du blueprint (jamais commité)
-      - key: ANTHROPIC_MODEL
-        value: claude-opus-4-7  # ajuste vers un modèle vision que ton compte supporte
-      - key: ANTHROPIC_TEMPERATURE
+      - key: OPENAI_MODEL
+        value: gpt-4o          # modèle vision OpenAI
+      - key: OPENAI_TEMPERATURE
         value: "0.0"
-      - key: ANTHROPIC_MAX_TOKENS
+      - key: OPENAI_MAX_TOKENS
         value: "4096"
       - key: STORAGE_BACKEND
         value: local
