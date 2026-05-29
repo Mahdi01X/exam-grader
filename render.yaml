@@ -26,7 +26,8 @@ services:
     dockerfilePath: backend/Dockerfile
     dockerContext: backend
     healthCheckPath: /api/health
-    dockerCommand: 'sh -c "alembic upgrade head && python -m app.bootstrap && uvicorn app.main:app --host 0.0.0.0 --port $PORT"'
+    # Pas de dockerCommand : on laisse le CMD du Dockerfile (sh start.sh) gérer
+    # migrations + bootstrap + uvicorn. Évite les soucis de quoting de Render.
     envVars:
       - key: DATABASE_URL
         fromDatabase:
