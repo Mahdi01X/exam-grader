@@ -80,6 +80,56 @@ export const api = {
     return handle(r);
   },
 
+  // Upload avec progression : `fetch` n'expose pas la progression d'envoi, donc
+  // on passe par XMLHttpRequest. `onProgress` reçoit le % d'octets transférés
+  // puis la phase "processing" une fois l'envoi terminé (le serveur travaille).
+  uploadWithProgress(
+    path: string,
+    file: File,
+    extra: Record<string, string> | undefined,
+    onProgress: (pct: number, phase: "uploading" | "processing") => void,
+  ): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      Object.entries(extra ?? {}).forEach(([k, v]) => fd.append(k, v));
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_URL}${path}`);
+      const token = localStorage.getItem("token");
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          onProgress(pct, pct >= 100 ? "processing" : "uploading");
+        }
+      };
+      xhr.upload.onload = () => onProgress(100, "processing");
+
+      xhr.onload = () => {
+        const ct = xhr.getResponseHeader("content-type") ?? "";
+        if (xhr.status >= 200 && xhr.status < 300) {
+          if (xhr.status === 204 || !xhr.responseText) return resolve(null);
+          resolve(ct.includes("application/json") ? JSON.parse(xhr.responseText) : xhr.responseText);
+          return;
+        }
+        let detail = xhr.statusText || `échec (${xhr.status})`;
+        try {
+          detail = JSON.parse(xhr.responseText).detail ?? detail;
+        } catch {
+          // réponse non-JSON (ex. page 502 du proxy) : on garde le statut
+        }
+        reject(new Error(detail));
+      };
+      xhr.onerror = () =>
+        reject(new Error("Connexion au serveur impossible (réseau ou serveur indisponible)."));
+      xhr.ontimeout = () => reject(new Error("Délai dépassé pendant le dépôt."));
+
+      xhr.send(fd);
+    });
+  },
+
   async download(path: string, filename: string) {
     const r = await fetch(`${API_URL}${path}`, { headers: authHeader() });
     if (!r.ok) throw new Error(`download failed: ${r.statusText}`);

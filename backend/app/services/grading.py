@@ -16,6 +16,7 @@ from app.models.grade import QuestionGrade
 from app.models.policy import GradingPolicy
 from app.models.rubric import RubricItem
 from app.services import audit
+from app.services.documents import get_page_images
 from app.storage import get_storage
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,30 @@ def _page_paths(copy: StudentCopy) -> list[Path]:
         f"exam-{copy.exam_id}/copies/{copy.student_identifier}/pages"
     )
     return sorted(pages_dir.glob("page-*.png"))
+
+
+def ensure_copy_pages(copy: StudentCopy) -> list[Path]:
+    """Garantit que les PNG des pages existent, en les rendant si besoin.
+
+    Le rendu PDF→PNG est volontairement déporté ici (hors de l'upload) : il est
+    lourd et bloquant, et le faire pendant la requête d'upload faisait tomber la
+    petite instance Render (→ 502). Ici on est appelé depuis la notation, un
+    endpoint synchrone exécuté dans le threadpool : l'event loop reste libre.
+    """
+    pages = _page_paths(copy)
+    if pages:
+        return pages
+    storage = get_storage()
+    source = storage.absolute(copy.file_path)
+    if not source.exists():
+        raise ValueError(
+            "fichier source de la copie introuvable — le stockage éphémère a "
+            "peut-être été purgé (redéploiement) ; redéposez la copie"
+        )
+    pages_dir = storage.absolute(
+        f"exam-{copy.exam_id}/copies/{copy.student_identifier}/pages"
+    )
+    return get_page_images(source, pages_dir)
 
 
 def _by_qnum(answers: list[CopyAnswer]) -> dict[str, CopyAnswer]:
@@ -52,7 +77,7 @@ def grade_copy(db: Session, copy: StudentCopy, user_id: Optional[int] = None) ->
     if not policies:
         raise ValueError("no grading policies configured for this exam")
 
-    pages = _page_paths(copy)
+    pages = ensure_copy_pages(copy)
     if not pages:
         raise ValueError("no rendered pages found for copy")
 

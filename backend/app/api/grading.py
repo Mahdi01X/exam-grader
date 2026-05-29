@@ -31,7 +31,7 @@ def _exam_or_403(db: Session, exam_id: int, user: User) -> Exam:
 
 
 @router.post("/rubric/extract", response_model=list[RubricItemIn])
-async def extract_rubric_endpoint(
+def extract_rubric_endpoint(
     exam_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -40,6 +40,10 @@ async def extract_rubric_endpoint(
     """Le prof dépose le corrigé. On rend les pages, on extrait via vision,
     puis on retourne une PROPOSITION de barème — qu'il devra valider via
     PUT /rubric/bulk avant de continuer.
+
+    Endpoint synchrone (`def`) : le rendu PDF→PNG et l'appel vision (bloquants)
+    s'exécutent dans le threadpool FastAPI, jamais sur l'event loop — sinon ils
+    gèlent le health-check de l'instance Render (→ 502 perçu comme erreur CORS).
     """
     exam = _exam_or_403(db, exam_id, user)
     settings = get_settings()
@@ -55,7 +59,7 @@ async def extract_rubric_endpoint(
     written = 0
     limit = settings.max_upload_mb * 1024 * 1024
     with open(abs_path, "wb") as out:
-        while chunk := await file.read(1024 * 1024):
+        while chunk := file.file.read(1024 * 1024):
             written += len(chunk)
             if written > limit:
                 out.close()

@@ -15,6 +15,8 @@ import {
   FileText,
   CheckCircle2,
   RefreshCw,
+  X,
+  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 import { api } from "../lib/api";
@@ -47,6 +49,13 @@ type Copy = {
 };
 
 type Guidance = { icon: LucideIcon; title: string; text: string; tone: Tone };
+
+type UploadProg = {
+  ident: string;
+  phase: "uploading" | "processing" | "done" | "error";
+  pct: number;
+  message?: string;
+};
 
 function computeGuidance(p: {
   rubricCount: number;
@@ -127,6 +136,7 @@ export default function ExamDetail() {
   const [copies, setCopies] = useState<Copy[]>([]);
   const [busy, setBusy] = useState(false);
   const [gradingId, setGradingId] = useState<number | null>(null);
+  const [upload, setUpload] = useState<UploadProg | null>(null);
 
   async function reload() {
     const [e, r, p, c] = await Promise.all([
@@ -218,13 +228,20 @@ export default function ExamDetail() {
   // ---- Copies ----
   async function uploadCopy(file: File, ident: string) {
     setBusy(true);
+    setUpload({ ident, phase: "uploading", pct: 0 });
     try {
-      await api.upload(`/api/exams/${examId}/copies`, file, {
-        student_identifier: ident,
-      });
+      await api.uploadWithProgress(
+        `/api/exams/${examId}/copies`,
+        file,
+        { student_identifier: ident },
+        (pct, phase) => setUpload((u) => (u ? { ...u, pct, phase } : u)),
+      );
+      setUpload((u) => (u ? { ...u, phase: "done", pct: 100 } : u));
       notify(`Copie de ${ident} déposée. Prochaine étape : « Noter ».`);
       await reload();
+      setTimeout(() => setUpload((u) => (u?.phase === "done" ? null : u)), 1400);
     } catch (e: any) {
+      setUpload((u) => (u ? { ...u, phase: "error", message: e.message } : u));
       notify(e.message, "error");
     } finally {
       setBusy(false);
@@ -537,6 +554,78 @@ export default function ExamDetail() {
           Tableur de la classe (.xlsx)
         </Button>
       </Card>
+
+      {upload && <UploadProgressModal s={upload} onClose={() => setUpload(null)} />}
+    </div>
+  );
+}
+
+function UploadProgressModal({ s, onClose }: { s: UploadProg; onClose: () => void }) {
+  const closable = s.phase === "done" || s.phase === "error";
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in"
+      onClick={closable ? onClose : undefined}
+    >
+      <div
+        className="card w-full max-w-md shadow-pop animate-slide-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <h2 className="section-title">Dépôt de la copie</h2>
+          {closable && (
+            <button className="btn-ghost btn-icon" onClick={onClose} title="Fermer">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="p-5 space-y-4">
+          <p className="text-sm text-slate-500">
+            Étudiant : <span className="font-medium text-slate-800">{s.ident}</span>
+          </p>
+
+          {(s.phase === "uploading" || s.phase === "processing") && (
+            <>
+              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+                <div
+                  className={`h-full bg-brand-500 transition-all duration-200 ${
+                    s.phase === "processing" ? "animate-pulse" : ""
+                  }`}
+                  style={{ width: `${s.phase === "processing" ? 100 : s.pct}%` }}
+                />
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <Spinner className="w-4 h-4" />
+                {s.phase === "uploading"
+                  ? `Téléversement du fichier… ${s.pct}%`
+                  : "Traitement sur le serveur (analyse du document)…"}
+              </div>
+            </>
+          )}
+
+          {s.phase === "done" && (
+            <div className="flex items-center gap-2 text-sm text-emerald-700">
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+              Copie déposée. Prochaine étape : « Noter ».
+            </div>
+          )}
+
+          {s.phase === "error" && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-2 text-sm text-rose-700">
+                <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+                <span>{s.message ?? "Échec du dépôt de la copie."}</span>
+              </div>
+              <div className="flex justify-end">
+                <Button variant="secondary" size="sm" onClick={onClose}>
+                  Fermer
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -13,7 +13,8 @@ from app.models.grade import QuestionGrade
 from app.models.user import User, UserRole
 from app.schemas.copy import CopyOut, CopyDetailOut
 from app.services import audit
-from app.services.documents import count_pdf_pages, get_page_images
+from app.services.documents import count_pdf_pages
+from app.services.grading import ensure_copy_pages
 from app.storage import get_storage
 
 router = APIRouter(prefix="/api/exams/{exam_id}/copies", tags=["copies"])
@@ -32,13 +33,24 @@ ALLOWED_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 
 
 @router.post("", response_model=CopyOut, status_code=status.HTTP_201_CREATED)
-async def upload_copy(
+def upload_copy(
     exam_id: int,
     student_identifier: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
+    """Dépôt d'une copie : on enregistre le fichier et on compte les pages.
+
+    Le rendu PDF→PNG (lourd en CPU/RAM) est volontairement DÉPORTÉ à la notation
+    (cf. services.grading.ensure_copy_pages). Le faire ici bloquait l'event loop
+    et saturait la RAM de la petite instance Render → le health-check ne répondait
+    plus → l'instance était redémarrée → 502 Bad Gateway (perçu comme une erreur
+    CORS côté navigateur, car la réponse 502 du proxy n'a pas d'en-tête CORS).
+
+    Endpoint synchrone (`def`) : FastAPI l'exécute dans son threadpool, l'event
+    loop reste libre de répondre au health-check même pendant l'écriture du fichier.
+    """
     _exam_or_403(db, exam_id, user)
     settings = get_settings()
 
@@ -54,7 +66,7 @@ async def upload_copy(
     written = 0
     limit = settings.max_upload_mb * 1024 * 1024
     with open(abs_path, "wb") as out:
-        while chunk := await file.read(1024 * 1024):
+        while chunk := file.file.read(1024 * 1024):
             written += len(chunk)
             if written > limit:
                 out.close()
@@ -70,13 +82,8 @@ async def upload_copy(
         try:
             page_count = count_pdf_pages(abs_path)
         except Exception as e:
+            abs_path.unlink(missing_ok=True)
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"invalid pdf: {e}")
-
-    pages_dir = storage.absolute(f"exam-{exam_id}/copies/{student_identifier}/pages")
-    try:
-        get_page_images(abs_path, pages_dir)
-    except Exception as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"render failed: {e}")
 
     copy = StudentCopy(
         exam_id=exam_id,
