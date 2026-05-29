@@ -1,0 +1,79 @@
+# Render Blueprint — Exam Grader
+# Provisionne : PostgreSQL (managé) + API (Docker, poppler inclus) + Frontend (static).
+# Région Frankfurt (UE) pour la résidence des données (RGPD).
+#
+# IMPORTANT — après la première création des services, vérifie les URLs réelles
+# des deux services dans le dashboard Render. Si elles diffèrent des valeurs
+# ci-dessous (collision de nom => suffixe aléatoire), ajuste :
+#   - VITE_API_URL (service examgrader-web) = URL publique de l'API
+#   - CORS_ORIGINS (service examgrader-api) = URL publique du frontend
+# puis relance un déploiement. (CORS_ORIGINS accepte aussi "*".)
+
+databases:
+  - name: examgrader-db
+    databaseName: examgrader
+    user: examgrader
+    plan: free
+    region: frankfurt
+
+services:
+  # ---------- API : FastAPI + poppler (Docker) ----------
+  - name: examgrader-api
+    type: web
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    healthCheckPath: /api/health
+    dockerCommand: 'sh -c "alembic upgrade head && python -m app.bootstrap && uvicorn app.main:app --host 0.0.0.0 --port $PORT"'
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: examgrader-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ANTHROPIC_API_KEY
+        sync: false            # saisi à la création du blueprint (jamais commité)
+      - key: ANTHROPIC_MODEL
+        value: claude-opus-4-7  # ajuste vers un modèle vision que ton compte supporte
+      - key: ANTHROPIC_TEMPERATURE
+        value: "0.0"
+      - key: ANTHROPIC_MAX_TOKENS
+        value: "4096"
+      - key: STORAGE_BACKEND
+        value: local
+      - key: STORAGE_LOCAL_ROOT
+        value: /data/uploads
+      - key: POPPLER_PATH
+        value: ""              # vide => poppler via le PATH (présent dans l'image)
+      - key: PDF_RENDER_DPI
+        value: "300"
+      - key: CONFIDENCE_REVIEW_THRESHOLD
+        value: "0.80"
+      - key: MAX_UPLOAD_MB
+        value: "50"
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false            # ton email admin
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false            # ton mot de passe admin initial
+      - key: CORS_ORIGINS
+        value: https://examgrader-web.onrender.com
+
+  # ---------- Frontend : build Vite, servi en static ----------
+  - name: examgrader-web
+    type: web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: VITE_API_URL
+        value: https://examgrader-api.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
