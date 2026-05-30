@@ -2,11 +2,12 @@
 from __future__ import annotations
 import io
 from typing import Iterable
+from xml.sax.saxutils import escape as _xml_escape
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import (
     SimpleDocTemplate,
@@ -22,6 +23,16 @@ from app.models.copy import StudentCopy
 from app.models.exam import Exam
 from app.models.grade import QuestionGrade
 from app.models.rubric import RubricItem
+
+
+def _esc(text: object) -> str:
+    """Échappe le texte dynamique inséré dans un Paragraph ReportLab.
+
+    ReportLab interprète `<`, `>` et `&` comme du balisage : sans échappement,
+    une réponse contenant « x < 5 » ou « R&D » casse le rendu (ou affiche une
+    balise brute). On échappe donc tout contenu venant de la BD / de l'IA.
+    """
+    return _xml_escape(str(text if text is not None else ""))
 
 
 def class_xlsx(exam: Exam, rubric: list[RubricItem], copies: list[StudentCopy],
@@ -68,11 +79,15 @@ def annotated_pdf(exam: Exam, copy: StudentCopy, rubric: list[RubricItem],
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5 * cm, rightMargin=1.5 * cm)
     styles = getSampleStyleSheet()
+    # Style compact pour les cellules. Un Paragraph s'enroule dans la largeur de
+    # la colonne ; une chaîne brute, elle, déborde sur la colonne voisine — c'est
+    # ce qui faisait chevaucher « Règle » et « Justification ».
+    cell = ParagraphStyle("cell", parent=styles["BodyText"], fontSize=8, leading=10)
     story = []
 
-    story.append(Paragraph(f"<b>{exam.title}</b>", styles["Title"]))
-    story.append(Paragraph(f"Matière : {exam.subject or '—'}", styles["Normal"]))
-    story.append(Paragraph(f"Étudiant : <b>{copy.student_identifier}</b>", styles["Normal"]))
+    story.append(Paragraph(_esc(exam.title), styles["Title"]))
+    story.append(Paragraph(f"Matière : {_esc(exam.subject or '—')}", styles["Normal"]))
+    story.append(Paragraph(f"Étudiant : <b>{_esc(copy.student_identifier)}</b>", styles["Normal"]))
     story.append(Spacer(1, 0.5 * cm))
 
     grades_by_q = {g.rubric_item_id: g for g in grades}
@@ -89,37 +104,56 @@ def annotated_pdf(exam: Exam, copy: StudentCopy, rubric: list[RubricItem],
         justification = (g.justification if g else "—")[:240]
         confidence = f"{g.confidence:.2f}" if g else "—"
         data.append([
-            Paragraph(f"<b>Q{r.question_number}</b><br/>{r.intitule[:120]}", styles["BodyText"]),
+            Paragraph(f"<b>Q{_esc(r.question_number)}</b><br/>{_esc(r.intitule[:120])}", cell),
             f"{pts:.2f} / {r.points_max:.2f}",
-            policy_name,
-            Paragraph(justification, styles["BodyText"]),
+            Paragraph(_esc(policy_name), cell),          # Paragraph => le texte s'enroule
+            Paragraph(_esc(justification), cell),
             confidence,
         ])
-    data.append(["", f"<b>{total_pts:.2f} / {total_max:.2f}</b>", "", "", ""])
+    # Ligne total : texte simple. Le gras vient du TableStyle ci-dessous, PAS de
+    # balises HTML (une chaîne de table n'est pas interprétée : « <b> » s'afficherait
+    # tel quel, comme dans l'ancien export).
+    data.append(["", f"{total_pts:.2f} / {total_max:.2f}", "", "", ""])
 
-    table = Table(data, colWidths=[4 * cm, 2.5 * cm, 3 * cm, 6 * cm, 1.5 * cm], repeatRows=1)
+    table = Table(
+        data,
+        colWidths=[3.7 * cm, 2.3 * cm, 4.2 * cm, 5.8 * cm, 1.5 * cm],
+        repeatRows=1,
+    )
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E40AF")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
         ("GRID", (0, 0), (-1, -2), 0.25, colors.grey),
         ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#F1F5F9")),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, -1), (-1, -1), 9),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        # Colonnes en texte brut (Points, Conf.) : taille 8 pour rester cohérent.
+        ("FONTSIZE", (1, 1), (1, -2), 8),
+        ("FONTSIZE", (4, 1), (4, -2), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     story.append(table)
 
     # Transcriptions détaillées par question
     story.append(PageBreak())
-    story.append(Paragraph("<b>Détail des transcriptions</b>", styles["Heading2"]))
+    story.append(Paragraph("Détail des transcriptions", styles["Heading2"]))
     for r in rubric:
         g = grades_by_q.get(r.id)
-        story.append(Paragraph(f"<b>Q{r.question_number} — {r.intitule[:200]}</b>", styles["Heading3"]))
-        story.append(Paragraph(f"<i>Attendu :</i> {r.expected_answer[:500]}", styles["BodyText"]))
+        story.append(
+            Paragraph(f"Q{_esc(r.question_number)} — {_esc(r.intitule[:200])}", styles["Heading3"])
+        )
+        story.append(Paragraph(f"<i>Attendu :</i> {_esc(r.expected_answer[:500])}", styles["BodyText"]))
         if g:
-            story.append(Paragraph(f"<i>Transcription :</i> {(g.extracted_text or '—')[:1000]}", styles["BodyText"]))
-            story.append(Paragraph(f"<i>Justification :</i> {g.justification or '—'}", styles["BodyText"]))
+            story.append(
+                Paragraph(f"<i>Transcription :</i> {_esc((g.extracted_text or '—')[:1000])}", styles["BodyText"])
+            )
+            story.append(
+                Paragraph(f"<i>Justification :</i> {_esc(g.justification or '—')}", styles["BodyText"])
+            )
         story.append(Spacer(1, 0.2 * cm))
 
     doc.build(story)

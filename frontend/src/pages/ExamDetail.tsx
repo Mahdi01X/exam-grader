@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -17,12 +17,14 @@ import {
   RefreshCw,
   X,
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
   type LucideIcon,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { useToast } from "../components/Toast";
 import { Badge, Button, Card, EmptyState, Spinner, type Tone } from "../components/ui";
-import { Stepper } from "../components/Stepper";
+import { Stepper, STEP_LABELS, stepForStatus } from "../components/Stepper";
 import { examStatus, copyStatus } from "../lib/status";
 import Dashboard from "../components/Dashboard";
 
@@ -137,6 +139,10 @@ export default function ExamDetail() {
   const [busy, setBusy] = useState(false);
   const [gradingId, setGradingId] = useState<number | null>(null);
   const [upload, setUpload] = useState<UploadProg | null>(null);
+  // Étape du wizard affichée (0..3). Initialisée une seule fois depuis le statut
+  // de l'examen, puis pilotée par l'utilisateur (Stepper / boutons Préc./Suiv.).
+  const [step, setStep] = useState(0);
+  const didInitStep = useRef(false);
 
   async function reload() {
     const [e, r, p, c] = await Promise.all([
@@ -149,6 +155,10 @@ export default function ExamDetail() {
     setRubric(r);
     setPolicies(p);
     setCopies(c);
+    if (!didInitStep.current) {
+      setStep(stepForStatus(e.status));
+      didInitStep.current = true;
+    }
   }
 
   useEffect(() => {
@@ -166,7 +176,14 @@ export default function ExamDetail() {
       );
       await reload();
       setRubric(draft.map((d, i) => ({ ...d, ordre: i })));
-      notify(`${draft.length} questions extraites — vérifiez puis enregistrez.`);
+      if (draft.length === 0) {
+        notify(
+          "Aucune question détectée sur l'image. Vérifiez le cadrage/la netteté, ou ajoutez les questions à la main.",
+          "info",
+        );
+      } else {
+        notify(`${draft.length} questions extraites — vérifiez puis enregistrez.`);
+      }
     } catch (e: any) {
       notify(e.message, "error");
     } finally {
@@ -307,7 +324,7 @@ export default function ExamDetail() {
           </div>
         </div>
         <div className="mt-5 overflow-x-auto pb-1">
-          <Stepper status={exam.status} />
+          <Stepper status={exam.status} current={step} onStepClick={setStep} />
         </div>
       </div>
 
@@ -320,6 +337,9 @@ export default function ExamDetail() {
         </div>
       </div>
 
+      {/* ───────── ÉTAPE 1 — Barème & règles de notation ───────── */}
+      {step === 0 && (
+        <>
       {/* Barème */}
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
@@ -334,7 +354,7 @@ export default function ExamDetail() {
               Importer un corrigé
               <input
                 type="file"
-                accept=".pdf,image/*"
+                accept=".pdf,image/*,.heic,.heif"
                 className="hidden"
                 disabled={busy}
                 onChange={(e) => e.target.files?.[0] && uploadRubric(e.target.files[0])}
@@ -442,118 +462,129 @@ export default function ExamDetail() {
         </div>
       </Card>
 
-      {/* Copies */}
-      <Card className="overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-brand-600" />
-            <h2 className="section-title">Copies</h2>
-            <Badge tone="neutral">{copies.length}</Badge>
+        </>
+      )}
+
+      {/* ───────── ÉTAPE 2 — Dépôt des copies ───────── */}
+      {step === 1 && (
+        <Card className="overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-brand-600" />
+              <h2 className="section-title">Dépôt des copies</h2>
+              <Badge tone="neutral">{copies.length}</Badge>
+            </div>
+            <CopyUploader onUpload={uploadCopy} disabled={busy} />
           </div>
-          <CopyUploader onUpload={uploadCopy} disabled={busy} />
-        </div>
-        {copies.length === 0 ? (
-          <EmptyState
-            icon={Users}
-            title="Aucune copie déposée"
-            description="Déposez les copies (PDF ou images) avec l'identifiant de chaque étudiant."
+          <CopiesTable
+            copies={copies}
+            mode="deposit"
+            canGrade={canGrade}
+            gradingId={gradingId}
+            onGrade={gradeCopy}
+            onReview={(cid) => nav(`/copies/${cid}`)}
           />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[560px]">
-              <thead>
-                <tr className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide bg-slate-50/60">
-                  <th className="px-5 py-2.5">Étudiant</th>
-                  <th className="px-3 py-2.5 w-20">Pages</th>
-                  <th className="px-3 py-2.5 w-36">Statut</th>
-                  <th className="px-3 py-2.5 text-right w-60" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {copies.map((c) => {
-                  const cm = copyStatus(c.status);
-                  const pending = c.status === "uploaded" || c.status === "extracted";
-                  const isGraded = c.status === "graded";
-                  const isReviewed = c.status === "reviewed";
-                  return (
-                    <tr key={c.id} className="hover:bg-slate-50/40">
-                      <td className="px-5 py-3 font-medium text-slate-800">
-                        {c.student_identifier}
-                      </td>
-                      <td className="px-3 py-3 text-slate-500">{c.page_count}</td>
-                      <td className="px-3 py-3">
-                        <Badge tone={cm.tone}>{cm.label}</Badge>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="flex items-center justify-end gap-2 flex-wrap">
-                          {pending && (
-                            <Button
-                              size="sm"
-                              variant="primary"
-                              icon={Sparkles}
-                              loading={gradingId === c.id}
-                              disabled={!canGrade}
-                              title={canGrade ? "Lancer la correction IA" : "Validez d'abord le barème"}
-                              onClick={() => gradeCopy(c.id)}
-                            >
-                              Noter
-                            </Button>
-                          )}
-                          {(isGraded || isReviewed) && (
-                            <Button
-                              size="sm"
-                              variant={isGraded ? "primary" : "secondary"}
-                              icon={Eye}
-                              onClick={() => nav(`/copies/${c.id}`)}
-                            >
-                              {isReviewed ? "Revoir" : "Réviser"}
-                            </Button>
-                          )}
-                          {isGraded && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              icon={RefreshCw}
-                              loading={gradingId === c.id}
-                              title="Relancer la notation"
-                              onClick={() => gradeCopy(c.id)}
-                            >
-                              Re-noter
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        </Card>
+      )}
+
+      {/* ───────── ÉTAPE 3 — Correction IA ───────── */}
+      {step === 2 && (
+        <Card className="overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-brand-600" />
+              <h2 className="section-title">Correction IA</h2>
+              <Badge tone="neutral">
+                {graded + reviewed}/{copies.length} notées
+              </Badge>
+            </div>
           </div>
-        )}
-      </Card>
+          {!canGrade && (
+            <div className="px-5 py-3 text-sm text-amber-700 bg-amber-50 border-b border-amber-100">
+              Validez d'abord le barème (étape « Barème ») pour activer la correction.
+            </div>
+          )}
+          <CopiesTable
+            copies={copies}
+            mode="grade"
+            canGrade={canGrade}
+            gradingId={gradingId}
+            onGrade={gradeCopy}
+            onReview={(cid) => nav(`/copies/${cid}`)}
+          />
+        </Card>
+      )}
 
-      {/* Dashboard */}
-      <Dashboard examId={examId} />
+      {/* ───────── ÉTAPE 4 — Revue & clôture ───────── */}
+      {step === 3 && (
+        <>
+          <Card className="overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Eye className="w-4 h-4 text-brand-600" />
+                <h2 className="section-title">Revue &amp; clôture</h2>
+                <Badge tone="neutral">
+                  {reviewed}/{copies.length} révisées
+                </Badge>
+              </div>
+            </div>
+            <CopiesTable
+              copies={copies}
+              mode="review"
+              canGrade={canGrade}
+              gradingId={gradingId}
+              onGrade={gradeCopy}
+              onReview={(cid) => nav(`/copies/${cid}`)}
+            />
+          </Card>
 
-      {/* Exports */}
-      <Card className="p-5">
-        <div className="flex items-center gap-2 mb-3">
-          <Download className="w-4 h-4 text-brand-600" />
-          <h2 className="section-title">Exports</h2>
-        </div>
+          {/* Dashboard */}
+          <Dashboard examId={examId} />
+
+          {/* Exports */}
+          <Card className="p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Download className="w-4 h-4 text-brand-600" />
+              <h2 className="section-title">Exports</h2>
+            </div>
+            <Button
+              variant="secondary"
+              icon={Download}
+              onClick={() =>
+                api
+                  .download(`/api/exams/${examId}/export/class.xlsx`, `exam-${examId}-notes.xlsx`)
+                  .then(() => notify("Tableur téléchargé."))
+                  .catch((e) => notify(e.message, "error"))
+              }
+            >
+              Tableur de la classe (.xlsx)
+            </Button>
+          </Card>
+        </>
+      )}
+
+      {/* Navigation entre étapes */}
+      <div className="flex items-center justify-between gap-3 pt-1">
+        <Button
+          variant="ghost"
+          icon={ChevronLeft}
+          disabled={step === 0}
+          onClick={() => setStep((s) => Math.max(0, s - 1))}
+        >
+          Précédent
+        </Button>
+        <span className="text-xs text-slate-400 hidden sm:block">
+          Étape {step + 1} / 4 — {STEP_LABELS[step]}
+        </span>
         <Button
           variant="secondary"
-          icon={Download}
-          onClick={() =>
-            api
-              .download(`/api/exams/${examId}/export/class.xlsx`, `exam-${examId}-notes.xlsx`)
-              .then(() => notify("Tableur téléchargé."))
-              .catch((e) => notify(e.message, "error"))
-          }
+          disabled={step === 3}
+          onClick={() => setStep((s) => Math.min(3, s + 1))}
         >
-          Tableur de la classe (.xlsx)
+          Suivant
+          <ChevronRight className="w-4 h-4" />
         </Button>
-      </Card>
+      </div>
 
       {upload && <UploadProgressModal s={upload} onClose={() => setUpload(null)} />}
     </div>
@@ -562,6 +593,19 @@ export default function ExamDetail() {
 
 function UploadProgressModal({ s, onClose }: { s: UploadProg; onClose: () => void }) {
   const closable = s.phase === "done" || s.phase === "error";
+  const active = s.phase === "uploading" || s.phase === "processing";
+
+  // Compteur de temps écoulé : retour « en temps réel » même quand il n'y a pas
+  // de % à montrer (phase serveur, ou instance Render qui se réveille).
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const t0 = Date.now();
+    setElapsed(0);
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 250);
+    return () => clearInterval(id);
+  }, [active, s.phase]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in"
@@ -585,21 +629,33 @@ function UploadProgressModal({ s, onClose }: { s: UploadProg; onClose: () => voi
             Étudiant : <span className="font-medium text-slate-800">{s.ident}</span>
           </p>
 
-          {(s.phase === "uploading" || s.phase === "processing") && (
+          {active && (
             <>
-              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-                <div
-                  className={`h-full bg-brand-500 transition-all duration-200 ${
-                    s.phase === "processing" ? "animate-pulse" : ""
-                  }`}
-                  style={{ width: `${s.phase === "processing" ? 100 : s.pct}%` }}
-                />
+              <div className="flex items-end justify-between">
+                <span className="text-sm font-medium text-slate-700">
+                  {s.phase === "uploading" ? "Téléversement…" : "Traitement sur le serveur…"}
+                </span>
+                <span className="text-2xl font-bold tabular-nums text-brand-600">
+                  {s.phase === "uploading" ? `${s.pct}%` : `${elapsed}s`}
+                </span>
               </div>
-              <div className="flex items-center gap-2 text-sm text-slate-600">
-                <Spinner className="w-4 h-4" />
+
+              <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                {s.phase === "uploading" ? (
+                  <div
+                    className="h-full bg-brand-500 transition-all duration-150"
+                    style={{ width: `${s.pct}%` }}
+                  />
+                ) : (
+                  <div className="h-full w-full bg-brand-400 animate-pulse" />
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <Spinner className="w-3.5 h-3.5" />
                 {s.phase === "uploading"
-                  ? `Téléversement du fichier… ${s.pct}%`
-                  : "Traitement sur le serveur (analyse du document)…"}
+                  ? "Envoi du fichier vers le serveur…"
+                  : "Analyse du document. Au 1er dépôt, le serveur peut mettre ~30 s à se réveiller."}
               </div>
             </>
           )}
@@ -626,6 +682,115 @@ function UploadProgressModal({ s, onClose }: { s: UploadProg; onClose: () => voi
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function CopiesTable({
+  copies,
+  mode,
+  canGrade,
+  gradingId,
+  onGrade,
+  onReview,
+}: {
+  copies: Copy[];
+  mode: "deposit" | "grade" | "review";
+  canGrade: boolean;
+  gradingId: number | null;
+  onGrade: (id: number) => void;
+  onReview: (id: number) => void;
+}) {
+  if (copies.length === 0) {
+    return (
+      <EmptyState
+        icon={Users}
+        title="Aucune copie déposée"
+        description={
+          mode === "deposit"
+            ? "Déposez les copies (PDF ou images) avec l'identifiant de chaque étudiant ci-dessus."
+            : "Revenez à l'étape « Dépôt des copies » pour ajouter des copies."
+        }
+      />
+    );
+  }
+  const showActions = mode !== "deposit";
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[560px]">
+        <thead>
+          <tr className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide bg-slate-50/60">
+            <th className="px-5 py-2.5">Étudiant</th>
+            <th className="px-3 py-2.5 w-20">Pages</th>
+            <th className="px-3 py-2.5 w-36">Statut</th>
+            {showActions && <th className="px-3 py-2.5 text-right w-60" />}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {copies.map((c) => {
+            const cm = copyStatus(c.status);
+            const pending = c.status === "uploaded" || c.status === "extracted";
+            const isGraded = c.status === "graded";
+            const isReviewed = c.status === "reviewed";
+            return (
+              <tr key={c.id} className="hover:bg-slate-50/40">
+                <td className="px-5 py-3 font-medium text-slate-800">{c.student_identifier}</td>
+                <td className="px-3 py-3 text-slate-500">{c.page_count}</td>
+                <td className="px-3 py-3">
+                  <Badge tone={cm.tone}>{cm.label}</Badge>
+                </td>
+                {showActions && (
+                  <td className="px-3 py-3">
+                    <div className="flex items-center justify-end gap-2 flex-wrap">
+                      {mode === "grade" && pending && (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          icon={Sparkles}
+                          loading={gradingId === c.id}
+                          disabled={!canGrade}
+                          title={canGrade ? "Lancer la correction IA" : "Validez d'abord le barème"}
+                          onClick={() => onGrade(c.id)}
+                        >
+                          Noter
+                        </Button>
+                      )}
+                      {mode === "grade" && isGraded && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={RefreshCw}
+                          loading={gradingId === c.id}
+                          title="Relancer la notation"
+                          onClick={() => onGrade(c.id)}
+                        >
+                          Re-noter
+                        </Button>
+                      )}
+                      {mode === "grade" && isReviewed && (
+                        <span className="text-xs font-medium text-emerald-600">Révisée</span>
+                      )}
+                      {mode === "review" && (isGraded || isReviewed) && (
+                        <Button
+                          size="sm"
+                          variant={isGraded ? "primary" : "secondary"}
+                          icon={Eye}
+                          onClick={() => onReview(c.id)}
+                        >
+                          {isReviewed ? "Revoir" : "Réviser"}
+                        </Button>
+                      )}
+                      {mode === "review" && pending && (
+                        <span className="text-xs text-slate-400">À corriger d'abord</span>
+                      )}
+                    </div>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -714,7 +879,7 @@ function CopyUploader({
         Déposer
         <input
           type="file"
-          accept=".pdf,image/*"
+          accept=".pdf,image/*,.heic,.heif"
           className="hidden"
           disabled={disabled || !ident}
           onChange={(e) => {

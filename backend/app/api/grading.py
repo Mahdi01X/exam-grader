@@ -14,7 +14,7 @@ from app.models.user import User, UserRole
 from app.schemas.copy import GradeOut, GradeOverride
 from app.schemas.rubric import RubricItemIn
 from app.services import audit
-from app.services.documents import get_page_images
+from app.services.documents import get_page_images, ALLOWED_UPLOAD_SUFFIXES
 from app.services.grading import grade_copy, override_grade
 from app.storage import get_storage
 
@@ -48,8 +48,12 @@ def extract_rubric_endpoint(
     exam = _exam_or_403(db, exam_id, user)
     settings = get_settings()
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in {".pdf", ".png", ".jpg", ".jpeg", ".webp"}:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"unsupported file type {suffix}")
+    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"format « {suffix or '?'} » non supporté. Formats acceptés : "
+            "PDF, JPG, PNG, WEBP, HEIC, BMP, GIF, TIFF.",
+        )
 
     storage = get_storage()
     rel = f"exam-{exam_id}/rubric/source{suffix}"
@@ -74,14 +78,30 @@ def extract_rubric_endpoint(
     try:
         pages = get_page_images(abs_path, pages_dir)
     except Exception as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"render failed: {e}")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Impossible de lire ce fichier (format non supporté ou image illisible) : {e}",
+        )
 
     try:
         extracted = extract_rubric(pages)
     except VisionUnavailable as e:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e))
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"Service d'IA indisponible (clé OpenAI manquante ou invalide). {e}",
+        )
     except VisionError as e:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"vision failed: {e}")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"L'IA n'a pas pu lire le corrigé. Réessayez, ou fournissez une image plus nette. ({e})",
+        )
+    except Exception as e:
+        # Filet de sécurité : jamais de 500 opaque à l'import (ex. sortie modèle
+        # inattendue). On renvoie un message exploitable par le prof.
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Extraction du barème impossible : {e}",
+        )
 
     exam.rubric_source_path = rel
     exam.status = ExamStatus.rubric_pending

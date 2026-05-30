@@ -18,6 +18,24 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# Support optionnel des photos iPhone (HEIC/HEIF). Si pillow-heif est présent,
+# Pillow saura ouvrir ces fichiers ; sinon on l'ignore (les autres formats
+# continuent de fonctionner).
+try:  # pragma: no cover - dépend de l'environnement
+    import pillow_heif  # type: ignore
+
+    pillow_heif.register_heif_opener()
+    _HEIC_OK = True
+except Exception:  # noqa: BLE001
+    _HEIC_OK = False
+
+# Formats image acceptés (Pillow gère nativement bmp/gif/tiff ; HEIC via pillow-heif).
+IMAGE_SUFFIXES = {
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff", ".heic", ".heif",
+}
+# Tout ce qu'on accepte à l'upload (corrigé ou copie) : PDF + images.
+ALLOWED_UPLOAD_SUFFIXES = {".pdf"} | IMAGE_SUFFIXES
+
 
 def count_pdf_pages(path: Path) -> int:
     return len(PdfReader(str(path)).pages)
@@ -81,10 +99,17 @@ def get_page_images(file_path: Path, output_dir: Path) -> List[Path]:
     suffix = file_path.suffix.lower()
     if suffix == ".pdf":
         return render_pdf_to_pngs(file_path, output_dir)
-    if suffix in (".png", ".jpg", ".jpeg", ".webp"):
+    if suffix in IMAGE_SUFFIXES:
+        if suffix in (".heic", ".heif") and not _HEIC_OK:
+            raise ValueError(
+                "format HEIC non pris en charge sur ce serveur — convertissez la "
+                "photo en JPG/PNG, ou installez pillow-heif"
+            )
         output_dir.mkdir(parents=True, exist_ok=True)
         dst = output_dir / "page-001.png"
         with Image.open(file_path) as im:
+            # GIF/TIFF multi-frames : la 1re image suffit. convert('RGB') gère le
+            # mode (P, RGBA, CMYK…) sans planter à l'enregistrement PNG.
             im.convert("RGB").save(dst, "PNG", optimize=True)
         return [dst]
-    raise ValueError(f"unsupported file type: {suffix}")
+    raise ValueError(f"format de fichier non supporté : {suffix}")

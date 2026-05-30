@@ -13,7 +13,7 @@ from app.models.grade import QuestionGrade
 from app.models.user import User, UserRole
 from app.schemas.copy import CopyOut, CopyDetailOut
 from app.services import audit
-from app.services.documents import count_pdf_pages
+from app.services.documents import count_pdf_pages, ALLOWED_UPLOAD_SUFFIXES
 from app.services.grading import ensure_copy_pages
 from app.storage import get_storage
 
@@ -29,7 +29,7 @@ def _exam_or_403(db: Session, exam_id: int, user: User) -> Exam:
     return exam
 
 
-ALLOWED_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+ALLOWED_SUFFIXES = ALLOWED_UPLOAD_SUFFIXES
 
 
 @router.post("", response_model=CopyOut, status_code=status.HTTP_201_CREATED)
@@ -56,7 +56,11 @@ def upload_copy(
 
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_SUFFIXES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"unsupported file type {suffix}")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"format « {suffix or '?'} » non supporté. Formats acceptés : "
+            "PDF, JPG, PNG, WEBP, HEIC, BMP, GIF, TIFF.",
+        )
 
     storage = get_storage()
     rel = f"exam-{exam_id}/copies/{student_identifier}/source{suffix}"
